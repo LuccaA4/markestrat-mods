@@ -1,0 +1,11 @@
+{
+  "name": "markestrat-mods",
+  "owner": { "name": "Lucca Rossi" },
+  "plugins": [
+    {
+      "name": "quadro-mensagens",
+      "source": "./plugins/quadro-mensagens",
+      "description": "Painel de leitura com as demandas e pendências trocadas entre as wikis de consultores do mesmo projeto"
+    }
+  ]
+}

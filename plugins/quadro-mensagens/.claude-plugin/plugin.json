@@ -1,0 +1,6 @@
+{
+  "name": "quadro-mensagens",
+  "version": "0.1.0",
+  "description": "Painel de leitura com as demandas e pendências trocadas entre as wikis de consultores do mesmo projeto",
+  "types": "./types/index.d.ts"
+}
