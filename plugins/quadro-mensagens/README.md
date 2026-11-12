@@ -9,6 +9,8 @@ Na pasta que reúne as wikis (as pastas `wiki-<Nome>`), o `wiki/estado-atual.md`
 - **Demandas:** cada título `### <Nome> — <assunto> (atribuído em AAAA-MM-DD)` da seção "Demandas da equipe";
 - **Pendências:** cada linha das tabelas "Pendências abertas" e "Pendências resolvidas" que diga "Responsável: <Nome>", "Combinar com <Nome>", "Validar com <Nome>", "Levar a <Nome>", "Perguntar a <Nome>" ou "Pedir a <Nome>".
 
+Cada mensagem aparece reescrita pela IA por extenso, sem os códigos internos da wiki (como P-018 ou D-003): os códigos são traduzidos pelos títulos das páginas da wiki de quem enviou. O resumo fica guardado e só é refeito quando o texto da pendência muda.
+
 O painel separa o que é **para você** do que foi **enviado por você**, com um link para a página de origem. Ele relê as wikis a cada 5 minutos e avisa quando chega algo novo. Nunca grava nada.
 
 ## Ver detalhes

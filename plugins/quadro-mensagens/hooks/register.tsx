@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Detalhe, Leitura, Mensagem } from '../types'
+import type { Detalhe, Leitura, Mensagem, Resumo } from '../types'
 import { gerarDetalhe } from './detalhes'
 import { acharRaiz, donoDaPasta, lerEstadoAtual } from './ler-wikis'
+import { resumirFaltantes, resumosGuardados } from './resumos'
 
 const PAINEL = 'quadro-mensagens'
 const TITULO = 'Mensagens da equipe'
@@ -11,15 +12,36 @@ const INTERVALO_MS = 5 * 60 * 1000
 
 // Mude a etiqueta quando os campos mudarem: o valor antigo guardado é descartado.
 const mensagens = atom({ plugin: 'quadro-mensagens', key: 'mensagens' } as const, [], {
-  shape: 'mensagens-2',
+  shape: 'mensagens-3',
 })
 const leitura = atom({ plugin: 'quadro-mensagens', key: 'leitura' } as const, null, {
   shape: 'leitura-1',
 })
 const selecionada = atom({ plugin: 'quadro-mensagens', key: 'selecionada' } as const, null)
 const detalhes = atom({ plugin: 'quadro-mensagens', key: 'detalhes' } as const, {}, {
-  shape: 'detalhes-1',
+  shape: 'detalhes-2',
 })
+const resumos = atom({ plugin: 'quadro-mensagens', key: 'resumos' } as const, {}, {
+  shape: 'resumos-1',
+})
+
+let resumindo = false
+/** Reescreve sem códigos as mensagens que ainda não têm resumo. */
+async function atualizarResumos($: EngineInterface) {
+  if (resumindo) return
+  resumindo = true
+  try {
+    const lista = await read($, mensagens)
+    const guardados = await resumosGuardados($)
+    await update($, resumos, () => guardados)
+    const todos = await resumirFaltantes($, lista)
+    await update($, resumos, () => todos)
+  } catch {
+    // Sem resumo agora: o cartão mostra o aviso e a próxima leitura tenta de novo.
+  } finally {
+    resumindo = false
+  }
+}
 
 const hora = (ms: number) => {
   const d = new Date(ms)
@@ -28,7 +50,9 @@ const hora = (ms: number) => {
 }
 
 const urlArquivo = (caminho: string) =>
-  `file:///${encodeURI(caminho.replace(/\\/g, '/').replace(/^\/+/, ''))}`
+  `file:///${encodeURI(caminho.replace(/\\/g, '/').replace(/^\/+/, ''))
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29')}`
 
 /** Lê todas as wikis da pasta do projeto. Nunca grava nada nelas. */
 async function lerTudo($: EngineInterface, cwd: string, avisar: boolean) {
@@ -60,6 +84,7 @@ async function lerTudo($: EngineInterface, cwd: string, avisar: boolean) {
   const novas = todas.filter(m => m.para === leitor && !antes.has(m.chave))
   await update($, mensagens, () => todas)
   await update($, leitura, () => ({ leitor, raiz, lidaEm: Date.now(), erros }))
+  void atualizarResumos($)
   const abertas = todas.filter(m => m.para === leitor && m.situacao === 'aberta').length
   await $.ui.status(abertas ? `${abertas} mensagem(ns) da equipe para você` : undefined)
   if (avisar && tinhaLeitura && novas.length > 0) {
@@ -75,7 +100,8 @@ async function detalhar($: EngineInterface, chave: string) {
   await update($, detalhes, d => ({ ...d, [chave]: { estado: 'gerando' as const } }))
   let resultado: Detalhe
   try {
-    resultado = await gerarDetalhe($, lida.raiz, lida.leitor, m)
+    const resumo = (await read($, resumos))[m.assinatura]
+    resultado = await gerarDetalhe($, lida.raiz, lida.leitor, m, resumo)
   } catch (err) {
     resultado = { estado: 'erro', erro: `Falha ao gerar os detalhes: ${String(err)}` }
   }
@@ -112,10 +138,11 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PAINEL }, async ($, e) => {
-    const { Box, Text, Button, Link, Markdown } = $.ui.resolve(e)
+    const { Box, Text, Button, Markdown } = $.ui.resolve(e)
     const lida = await read($, leitura)
     const lista = await read($, mensagens)
     const escolhida = await read($, selecionada)
+    const textos = await read($, resumos)
 
     if (!lida) {
       return (
@@ -129,7 +156,7 @@ export const register: Register = on => {
 
     const eu = lida.leitor
     const cabecalho = (m: Mensagem, outro: string) =>
-      `${m.tipo}${m.id ? ` ${m.id}` : ''} · ${outro}${m.data ? ` · ${m.data}` : ''}${
+      `${m.tipo} · ${outro}${m.data ? ` · ${m.data}` : ''}${
         m.situacao === 'resolvida' ? ' · resolvida' : ''
       }`
 
@@ -137,6 +164,7 @@ export const register: Register = on => {
     const m = escolhida ? lista.find(x => x.chave === escolhida) : undefined
     if (m) {
       const det = (await read($, detalhes))[m.chave]
+      const rs = textos[m.assinatura]
       const voltar = () => {
         void update($, selecionada, () => null)
       }
@@ -150,10 +178,21 @@ export const register: Register = on => {
           </Button>
           <Box flexDirection="column" borderStyle="round" paddingX={1} marginY={1}>
             <Text bold>{cabecalho(m, `de ${m.de}`)}</Text>
-            <Text>{m.completo}</Text>
-            {m.origem !== '' && <Text dimColor>Origem: {m.origem}</Text>}
-            {m.destrava !== '' && <Text dimColor>O que destrava: {m.destrava}</Text>}
-            <Link href={urlArquivo(m.arquivo)} label={`estado-atual da wiki de ${m.de}`} />
+            {rs ? (
+              <Box flexDirection="column">
+                <Text>{rs.resumo}</Text>
+                {rs.origem !== '' && <Text dimColor>De onde veio: {rs.origem}</Text>}
+                {rs.destrava !== '' && (
+                  <Text dimColor>
+                    {m.situacao === 'aberta' ? 'O que a resposta destrava' : 'Como foi resolvida'}:{' '}
+                    {rs.destrava}
+                  </Text>
+                )}
+              </Box>
+            ) : (
+              <Text dimColor>Preparando o resumo da mensagem…</Text>
+            )}
+            <Markdown text={`[Abrir o estado atual da wiki de ${m.de}](${urlArquivo(m.arquivo)})`} />
           </Box>
 
           {(!det || det.estado === 'gerando') && (
@@ -211,8 +250,12 @@ export const register: Register = on => {
         <Text bold={x.situacao === 'aberta'} dimColor={x.situacao === 'resolvida'}>
           {cabecalho(x, outro)}
         </Text>
-        <Text dimColor={x.situacao === 'resolvida'}>{x.texto}</Text>
-        <Link href={urlArquivo(x.arquivo)} label={`estado-atual da wiki de ${x.de}`} />
+        {textos[x.assinatura] ? (
+          <Text dimColor={x.situacao === 'resolvida'}>{textos[x.assinatura]?.resumo}</Text>
+        ) : (
+          <Text dimColor>Preparando o resumo da mensagem…</Text>
+        )}
+        <Markdown text={`[Abrir o estado atual da wiki de ${x.de}](${urlArquivo(x.arquivo)})`} />
         {comDetalhes && (
           <Button
             key={`d-${x.chave}`}

@@ -17,6 +17,15 @@ export type Mensagem = {
   destrava: string
   /** Páginas citadas na linha, relativas à pasta `wiki/` da wiki de origem. */
   links: string[]
+  /** Muda quando o texto da linha muda; chave do resumo guardado. */
+  assinatura: string
+}
+
+/** A mensagem reescrita pela IA, sem códigos de identificação. */
+export type Resumo = {
+  resumo: string
+  origem: string
+  destrava: string
 }
 
 /** Os detalhes que a IA monta para uma mensagem recebida. */
@@ -44,6 +53,7 @@ declare module 'claude-code' {
       leitura: Shaped<Leitura | null>
       selecionada: string | null
       detalhes: Shaped<Record<string, Detalhe>>
+      resumos: Shaped<Record<string, Resumo>>
     }
   }
 }

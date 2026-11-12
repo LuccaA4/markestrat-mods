@@ -1,6 +1,7 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Detalhe, Mensagem } from '../types'
+import type { Detalhe, Mensagem, Resumo } from '../types'
+import { semCodigos } from './resumos'
 
 const MODELO = 'sonnet'
 /** Pastas da wiki do leitor que entram como base para a sugestão de resposta. */
@@ -18,7 +19,7 @@ Responda SOMENTE com um objeto JSON, sem texto antes ou depois, no formato:
 
 Regras de escrita (valem para os três campos):
 - Português do Brasil, frases completas, sem abreviações internas, em Markdown simples (parágrafos curtos e listas). Sem títulos.
-- Nomeie a coisa antes do código: "a análise do custo completo da frota (A-001)", nunca só "A-001". Diga de qual wiki é cada item ("na wiki de Vitor Saito", "na sua wiki").
+- NUNCA escreva códigos de identificação da wiki, como P-018, D-003, A-001, A-001.C10, C10, F-002, R-003 ou E-001, nem "pendência 12" ou "conclusão 10". O leitor não conhece os códigos: escreva o nome por extenso ("a análise do custo completo da frota", "a decisão de medir o custo do capital pela Fipe vezes a Selic", "a reunião de 23 de outubro com o ponto focal"). Diga de qual wiki é cada item ("na wiki de Vitor Saito", "na sua wiki").
 - Uma afirmação de fonte não é fato comprovado: "segundo ..." . Diga o status das conclusões citadas (Hipótese, Interpretação, Acordada...).
 - Não invente. O que não estiver nas páginas é "não registrado".`
 
@@ -75,8 +76,9 @@ async function contextoDoColega($: EngineInterface, m: Mensagem) {
   return `<wiki_do_colega dono="${m.de}">\n${partes.join('\n\n')}\n</wiki_do_colega>`
 }
 
-const pedido = (m: Mensagem, leitor: string) =>
+const pedido = (m: Mensagem, leitor: string, resumo?: Resumo) =>
   [
+    resumo ? `Resumo já mostrado ao leitor: ${resumo.resumo}` : '',
     `O leitor é ${leitor}. A pendência abaixo foi endereçada a ele por ${m.de}, na wiki de ${m.de}.`,
     `Identificador na wiki de ${m.de}: ${m.id || '(demanda, sem identificador)'}`,
     `Tipo: ${m.tipo}. Situação: ${m.situacao}. Aberta em: ${m.data || 'não informado'}.`,
@@ -89,6 +91,16 @@ const pedido = (m: Mensagem, leitor: string) =>
     .filter(Boolean)
     .join('\n')
 
+/** Tira códigos que tenham escapado, linha a linha, preservando o Markdown. */
+const semCodigosMd = (s: string) =>
+  s
+    .split(String.fromCharCode(10))
+    .map(l => {
+      const lead = /^(\s*(?:[-*]|\d+\.)\s+)?/.exec(l)?.[0] ?? ''
+      return lead + semCodigos(l.slice(lead.length))
+    })
+    .join(String.fromCharCode(10))
+
 export const interpretar = (texto: string): Omit<Detalhe, 'estado'> | null => {
   const inicio = texto.indexOf('{')
   const fim = texto.lastIndexOf('}')
@@ -96,10 +108,11 @@ export const interpretar = (texto: string): Omit<Detalhe, 'estado'> | null => {
   try {
     const j = JSON.parse(texto.slice(inicio, fim + 1)) as Record<string, unknown>
     const s = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+    const limpo = (v: string | null) => (v === null ? null : semCodigosMd(v))
     return {
-      motivo: s(j.motivo) ?? 'Não registrado.',
-      detalhamento: s(j.detalhamento) ?? 'Não registrado.',
-      sugestao: s(j.sugestao),
+      motivo: limpo(s(j.motivo)) ?? 'Não registrado.',
+      detalhamento: limpo(s(j.detalhamento)) ?? 'Não registrado.',
+      sugestao: limpo(s(j.sugestao)),
     }
   } catch {
     return null
@@ -112,13 +125,14 @@ export async function gerarDetalhe(
   raiz: string,
   leitor: string,
   m: Mensagem,
+  resumo?: Resumo,
 ): Promise<Detalhe> {
   const [minha, colega] = [await wikiDoLeitor($, raiz, leitor), await contextoDoColega($, m)]
   const r = await $.model.complete({
     model: MODELO,
     system: SISTEMA,
     maxTokens: 3000,
-    prompt: [{ text: minha, cache: true }, { text: colega }, { text: pedido(m, leitor) }],
+    prompt: [{ text: minha, cache: true }, { text: colega }, { text: pedido(m, leitor, resumo) }],
   })
   if (!r.isAnswered) {
     const motivo = r.reason === 'api-error' ? `erro da API (${r.status ?? 'sem status'})` : r.reason

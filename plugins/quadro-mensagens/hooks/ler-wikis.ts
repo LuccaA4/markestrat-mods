@@ -101,6 +101,7 @@ export const lerEstadoAtual = (
           origem: '',
           destrava: '',
           links: [],
+          assinatura: assinatura(`${dono}|${assunto}`),
         })
       }
       continue
@@ -127,8 +128,42 @@ export const lerEstadoAtual = (
         origem: aberta ? limpar(c[2] ?? '', 100000) : '',
         destrava: limpar((aberta ? c[4] : c[3]) ?? '', 100000),
         links: linksInternos(`${c[1] ?? ''} ${aberta ? (c[2] ?? '') : ''}`),
+        assinatura: assinatura(linha),
       })
     }
   }
   return saida
+}
+
+/** Códigos de identificação da wiki: P-018, D-003, A-001, A-001.C10, F-002, R-003, E-001. */
+export const RE_CODIGO = /\b[ADEFPR]-\d{3}(?:\.C\d+)?\b/g
+
+export const codigosEm = (s: string): string[] => [...new Set(s.match(RE_CODIGO) ?? [])]
+
+/**
+ * O que cada código significa numa página da wiki: os títulos "# A-001 — ...",
+ * "## D-003 — ...", "### A-001.C10 — ..." e as linhas "| P-018 | texto |".
+ */
+export const glossarioDe = (texto: string): Record<string, string> => {
+  const g: Record<string, string> = {}
+  for (const linha of texto.split(/\r?\n/)) {
+    const t = /^#{1,3}\s+([ADEFPR]-\d{3}(?:\.C\d+)?)\s+[—–-]\s+(.+?)\s*$/.exec(linha)
+    if (t?.[1] && t[2]) {
+      g[t[1]] = limpar(t[2], 300)
+      continue
+    }
+    const p = /^\s*\|\s*(P-\d{3})\s*\|([^|]*)\|/.exec(linha)
+    if (p?.[1] && p[2] && !g[p[1]]) g[p[1]] = limpar(p[2], 300)
+  }
+  return g
+}
+
+/** Assinatura curta do conteúdo de uma mensagem: muda quando o texto muda. */
+export const assinatura = (s: string): string => {
+  let h = 0x811c9dc5
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(36)
 }
